@@ -159,13 +159,8 @@ class HipChat(jenkins_jobs.modules.base.Base):
             publishers = XML.SubElement(xml_parent, 'publishers')
         hippub = XML.SubElement(publishers,
                                 'jenkins.plugins.hipchat.HipChatNotifier')
-
-        if version >= pkg_resources.parse_version("0.1.8"):
-            XML.SubElement(hippub, 'buildServerUrl').text = self.jenkinsUrl
-            XML.SubElement(hippub, 'sendAs').text = self.sendAs
-        else:
-            XML.SubElement(hippub, 'jenkinsUrl').text = self.jenkinsUrl
-
+        XML.SubElement(hippub, 'buildServerUrl').text = self.jenkinsUrl
+        XML.SubElement(hippub, 'sendAs').text = self.sendAs
         XML.SubElement(hippub, 'authToken').text = self.authToken
         # The room specified here is the default room.  The default is
         # redundant in this case since a room must be specified.  Leave empty.
