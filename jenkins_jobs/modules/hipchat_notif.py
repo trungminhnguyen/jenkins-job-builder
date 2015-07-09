@@ -72,7 +72,6 @@ import xml.etree.ElementTree as XML
 import jenkins_jobs.modules.base
 import jenkins_jobs.errors
 import logging
-import pkg_resources
 from six.moves import configparser
 import sys
 
@@ -114,9 +113,6 @@ class HipChat(jenkins_jobs.modules.base.Base):
             return
         self._load_global_data()
 
-        plugin_info = self.registry.get_plugin_info("Jenkins HipChat Plugin")
-        version = pkg_resources.parse_version(plugin_info.get('version', '0'))
-
         properties = xml_parent.find('properties')
         if properties is None:
             properties = XML.SubElement(xml_parent, 'properties')
@@ -139,20 +135,18 @@ class HipChat(jenkins_jobs.modules.base.Base):
         XML.SubElement(pdefhip, 'startNotification').text = str(
             hipchat.get('notify-start', hipchat.get('start-notify',
                                                     False))).lower()
-
-        if version >= pkg_resources.parse_version("0.1.5"):
-            XML.SubElement(pdefhip, 'notifySuccess').text = str(
-                hipchat.get('notify-success', False)).lower()
-            XML.SubElement(pdefhip, 'notifyAborted').text = str(
-                hipchat.get('notify-aborted', False)).lower()
-            XML.SubElement(pdefhip, 'notifyNotBuilt').text = str(
-                hipchat.get('notify-not-built', False)).lower()
-            XML.SubElement(pdefhip, 'notifyUnstable').text = str(
-                hipchat.get('notify-unstable', False)).lower()
-            XML.SubElement(pdefhip, 'notifyFailure').text = str(
-                hipchat.get('notify-failure', False)).lower()
-            XML.SubElement(pdefhip, 'notifyBackToNormal').text = str(
-                hipchat.get('notify-back-to-normal', False)).lower()
+        XML.SubElement(pdefhip, 'notifySuccess').text = str(
+            hipchat.get('notify-success', False)).lower()
+        XML.SubElement(pdefhip, 'notifyAborted').text = str(
+            hipchat.get('notify-aborted', False)).lower()
+        XML.SubElement(pdefhip, 'notifyNotBuilt').text = str(
+            hipchat.get('notify-not-built', False)).lower()
+        XML.SubElement(pdefhip, 'notifyUnstable').text = str(
+            hipchat.get('notify-unstable', False)).lower()
+        XML.SubElement(pdefhip, 'notifyFailure').text = str(
+            hipchat.get('notify-failure', False)).lower()
+        XML.SubElement(pdefhip, 'notifyBackToNormal').text = str(
+            hipchat.get('notify-back-to-normal', False)).lower()
 
         publishers = xml_parent.find('publishers')
         if publishers is None:
