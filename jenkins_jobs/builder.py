@@ -99,7 +99,10 @@ class CacheStorage(object):
 
 class Jenkins(object):
     def __init__(self, url, user, password):
-        self.jenkins = jenkins.Jenkins(url, user, password)
+        if user == "" and password == "":
+            self.jenkins = jenkins.Jenkins(url)
+        else:
+            self.jenkins = jenkins.Jenkins(url, user, password)
         self._jobs = None
         self._job_list = None
 
