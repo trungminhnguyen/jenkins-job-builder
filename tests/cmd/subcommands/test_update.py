@@ -15,6 +15,7 @@
 # under the License.
 
 import os
+import six
 
 from jenkins_jobs import cmd
 from jenkins_jobs import builder
@@ -38,6 +39,26 @@ class UpdateTests(CmdTestsBase):
 
         cmd.execute(args, self.config)
         update_job_mock.assert_called_with([path], [])
+
+    @mock.patch('jenkins_jobs.builder.Jenkins.is_job', return_value=True)
+    @mock.patch('jenkins_jobs.builder.Jenkins.get_jobs')
+    @mock.patch('jenkins_jobs.builder.Jenkins.get_job_md5')
+    @mock.patch('jenkins_jobs.builder.Jenkins.update_job')
+    def test_update_jobs_decode_job_output(self, update_job_mock,
+                                           get_job_md5_mock, get_jobs_mock,
+                                           is_job_mock):
+        """
+        Test that job xml output has been decoded before attempting to update
+        """
+        # don't care about the value returned here
+        update_job_mock.return_value = ([], 0)
+
+        path = os.path.join(self.fixtures_path, 'cmd-002.yaml')
+        args = self.parser.parse_args(['update', path])
+
+        cmd.execute(args, self.config)
+        self.assertTrue(isinstance(update_job_mock.call_args[0][1],
+                                   six.text_type))
 
     @mock.patch('jenkins_jobs.builder.Jenkins.is_job', return_value=True)
     @mock.patch('jenkins_jobs.builder.Jenkins.get_jobs')
@@ -99,3 +120,40 @@ class UpdateTests(CmdTestsBase):
                           "Called with: %s" % (2, delete_job_mock.call_count,
                                                delete_job_mock.mock_calls))
         delete_job_mock.assert_has_calls(calls, any_order=True)
+
+    @mock.patch('jenkins_jobs.builder.jenkins.Jenkins')
+    def test_update_timeout_not_set(self, jenkins_mock):
+        """Check that timeout is left unset
+
+        Test that the Jenkins object has the timeout set on it only when
+        provided via the config option.
+        """
+
+        path = os.path.join(self.fixtures_path, 'cmd-002.yaml')
+        args = self.parser.parse_args(['update', path])
+
+        with mock.patch('jenkins_jobs.cmd.Builder.update_job') as update_mock:
+            update_mock.return_value = ([], 0)
+            cmd.execute(args, self.config)
+        # unless the timeout is set, should only call with 3 arguments
+        # (url, user, password)
+        self.assertEquals(len(jenkins_mock.call_args[0]), 3)
+
+    @mock.patch('jenkins_jobs.builder.jenkins.Jenkins')
+    def test_update_timeout_set(self, jenkins_mock):
+        """Check that timeout is set correctly
+
+        Test that the Jenkins object has the timeout set on it only when
+        provided via the config option.
+        """
+
+        path = os.path.join(self.fixtures_path, 'cmd-002.yaml')
+        args = self.parser.parse_args(['update', path])
+        self.config.set('jenkins', 'timeout', '0.2')
+
+        with mock.patch('jenkins_jobs.cmd.Builder.update_job') as update_mock:
+            update_mock.return_value = ([], 0)
+            cmd.execute(args, self.config)
+        # when timeout is set, the fourth argument to the Jenkins api init
+        # should be the value specified from the config
+        self.assertEquals(jenkins_mock.call_args[0][3], 0.2)

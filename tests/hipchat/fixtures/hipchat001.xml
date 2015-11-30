@@ -14,9 +14,9 @@
   </properties>
   <publishers>
     <jenkins.plugins.hipchat.HipChatNotifier>
-      <buildServerUrl>url</buildServerUrl>
-      <sendAs>send-as</sendAs>
-      <authToken>authtoken</authToken>
+      <buildServerUrl>green</buildServerUrl>
+      <sendAs>Jenkins</sendAs>
+      <authToken>blue</authToken>
       <room/>
     </jenkins.plugins.hipchat.HipChatNotifier>
   </publishers>
