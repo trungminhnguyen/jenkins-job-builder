@@ -54,9 +54,6 @@ def monkey_patch():
             raise JenkinsException('Error in request: %s' % (e.reason))
     jenkins.Jenkins.jenkins_open = _jenkins_open
 
-try:
-    import kerberos
-    assert kerberos  # pyflakes
-    monkey_patch()
-except ImportError:
-    pass
+import kerberos
+assert kerberos  # pyflakes
+monkey_patch()
