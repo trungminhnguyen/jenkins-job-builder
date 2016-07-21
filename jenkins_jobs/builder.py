@@ -114,9 +114,7 @@ class CacheStorage(object):
 
 class Jenkins(object):
     def __init__(self, url, user, password, timeout=_DEFAULT_TIMEOUT):
-        if user == "" and password == "":
-            self.jenkins = jenkins.Jenkins(url)
-        elif timeout != _DEFAULT_TIMEOUT:
+        if timeout != _DEFAULT_TIMEOUT:
             self.jenkins = jenkins.Jenkins(url, user, password, timeout)
         else:
             self.jenkins = jenkins.Jenkins(url, user, password)
