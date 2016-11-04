@@ -16,13 +16,12 @@
 # under the License.
 
 import os
-from testtools import TestCase
-from testscenarios.testcase import TestWithScenarios
+
 from jenkins_jobs.modules import properties
-from tests.base import get_scenarios, BaseTestCase
+from tests import base
 
 
-class TestCaseModuleProperties(TestWithScenarios, BaseTestCase, TestCase):
+class TestCaseModuleProperties(base.BaseScenariosTestCase):
     fixtures_path = os.path.join(os.path.dirname(__file__), 'fixtures')
-    scenarios = get_scenarios(fixtures_path)
+    scenarios = base.get_scenarios(fixtures_path)
     klass = properties.Properties

@@ -13,12 +13,10 @@
 # under the License.
 
 import xml.etree.ElementTree as XML
-import logging
 
-from six.moves import configparser
-from jenkins_jobs.errors import (JenkinsJobsException,
-                                 MissingAttributeError,
-                                 InvalidAttributeError)
+from jenkins_jobs.errors import InvalidAttributeError
+from jenkins_jobs.errors import JenkinsJobsException
+from jenkins_jobs.errors import MissingAttributeError
 
 
 def build_trends_publisher(plugin_name, xml_element, data):
@@ -59,6 +57,8 @@ def build_trends_publisher(plugin_name, xml_element, data):
         ('default-encoding', 'defaultEncoding', ''),
         ('can-run-on-failed', 'canRunOnFailed', False),
         ('use-stable-build-as-reference', 'useStableBuildAsReference', False),
+        ('use-previous-build-as-reference',
+         'usePreviousBuildAsReference', False),
         ('use-delta-values', 'useDeltaValues', False),
         ('thresholds', 'thresholds', {}),
         ('should-detect-modules', 'shouldDetectModules', False),
@@ -95,18 +95,16 @@ def config_file_provider_builder(xml_parent, data):
     for file in files:
         xml_file = XML.SubElement(xml_files, 'org.jenkinsci.plugins.'
                                   'configfiles.buildwrapper.ManagedFile')
-        file_id = file.get('file-id')
-        if file_id is None:
-            raise JenkinsJobsException("file-id is required for each "
-                                       "managed configuration file")
-        XML.SubElement(xml_file, 'fileId').text = str(file_id)
-        XML.SubElement(xml_file, 'targetLocation').text = file.get(
-            'target', '')
-        XML.SubElement(xml_file, 'variable').text = file.get(
-            'variable', '')
+        mapping = [
+            ('file-id', 'fileId', None),
+            ('target', 'targetLocation', ''),
+            ('variable', 'variable', ''),
+        ]
+        convert_mapping_to_xml(xml_file, file, mapping, fail_required=True)
 
 
 def config_file_provider_settings(xml_parent, data):
+    SETTINGS_TYPES = ['file', 'cfp']
     settings = {
         'default-settings':
         'jenkins.mvn.DefaultSettingsProvider',
@@ -126,17 +124,27 @@ def config_file_provider_settings(xml_parent, data):
     if 'settings' in data:
         # Support for Config File Provider
         settings_file = str(data['settings'])
-        if settings_file.startswith(
-            'org.jenkinsci.plugins.configfiles.maven.MavenSettingsConfig'):
+        settings_type = data.get('settings-type', 'file')
+
+        # For cfp versions <2.10.0 we are able to detect cfp via the config
+        # settings name.
+        text = 'org.jenkinsci.plugins.configfiles.maven.MavenSettingsConfig'
+        if settings_file.startswith(text):
+            settings_type = 'cfp'
+
+        if settings_type == 'file':
+            lsettings = XML.SubElement(
+                xml_parent, 'settings',
+                {'class': settings['settings']})
+            XML.SubElement(lsettings, 'path').text = settings_file
+        elif settings_type == 'cfp':
             lsettings = XML.SubElement(
                 xml_parent, 'settings',
                 {'class': settings['config-file-provider-settings']})
             XML.SubElement(lsettings, 'settingsConfigId').text = settings_file
         else:
-            lsettings = XML.SubElement(
-                xml_parent, 'settings',
-                {'class': settings['settings']})
-            XML.SubElement(lsettings, 'path').text = settings_file
+            raise InvalidAttributeError(
+                'settings-type', settings_type, SETTINGS_TYPES)
     else:
         XML.SubElement(xml_parent, 'settings',
                        {'class': settings['default-settings']})
@@ -144,9 +152,20 @@ def config_file_provider_settings(xml_parent, data):
     if 'global-settings' in data:
         # Support for Config File Provider
         global_settings_file = str(data['global-settings'])
-        if global_settings_file.startswith(
-                'org.jenkinsci.plugins.configfiles.maven.'
-                'GlobalMavenSettingsConfig'):
+        global_settings_type = data.get('settings-type', 'file')
+
+        # For cfp versions <2.10.0 we are able to detect cfp via the config
+        # settings name.
+        text = ('org.jenkinsci.plugins.configfiles.maven.'
+                'GlobalMavenSettingsConfig')
+        if global_settings_file.startswith(text):
+            global_settings_type = 'cfp'
+
+        if global_settings_type == 'file':
+            gsettings = XML.SubElement(xml_parent, 'globalSettings',
+                                       {'class': settings['global-settings']})
+            XML.SubElement(gsettings, 'path').text = global_settings_file
+        elif global_settings_type == 'cfp':
             gsettings = XML.SubElement(
                 xml_parent, 'globalSettings',
                 {'class': settings['config-file-provider-global-settings']})
@@ -154,9 +173,8 @@ def config_file_provider_settings(xml_parent, data):
                 gsettings,
                 'settingsConfigId').text = global_settings_file
         else:
-            gsettings = XML.SubElement(xml_parent, 'globalSettings',
-                                       {'class': settings['global-settings']})
-            XML.SubElement(gsettings, 'path').text = global_settings_file
+            raise InvalidAttributeError(
+                'settings-type', global_settings_type, SETTINGS_TYPES)
     else:
         XML.SubElement(xml_parent, 'globalSettings',
                        {'class': settings['default-global-settings']})
@@ -172,7 +190,9 @@ def copyartifact_build_selector(xml_parent, data, select_tag='selector'):
                   'upstream-build': 'TriggeredBuildSelector',
                   'permalink': 'PermalinkBuildSelector',
                   'workspace-latest': 'WorkspaceSelector',
-                  'build-param': 'ParameterizedBuildSelector'}
+                  'build-param': 'ParameterizedBuildSelector',
+                  'downstream-build': 'DownstreamBuildSelector',
+                  'multijob-build': 'MultiJobBuildSelector'}
     if select not in selectdict:
         raise InvalidAttributeError('which-build',
                                     select,
@@ -188,9 +208,16 @@ def copyartifact_build_selector(xml_parent, data, select_tag='selector'):
         raise InvalidAttributeError('permalink',
                                     permalink,
                                     permalinkdict.keys())
-    selector = XML.SubElement(xml_parent, select_tag,
-                              {'class': 'hudson.plugins.copyartifact.' +
-                               selectdict[select]})
+    if select == 'multijob-build':
+        selector = XML.SubElement(xml_parent, select_tag,
+                                  {'class':
+                                   'com.tikal.jenkins.plugins.multijob.' +
+                                      selectdict[select]})
+    else:
+        selector = XML.SubElement(xml_parent, select_tag,
+                                  {'class':
+                                   'hudson.plugins.copyartifact.' +
+                                      selectdict[select]})
     if select == 'specific-build':
         XML.SubElement(selector, 'buildNumber').text = data['build-number']
     if select == 'last-successful':
@@ -203,36 +230,27 @@ def copyartifact_build_selector(xml_parent, data, select_tag='selector'):
         XML.SubElement(selector, 'id').text = permalinkdict[permalink]
     if select == 'build-param':
         XML.SubElement(selector, 'parameterName').text = data['param']
+    if select == 'downstream-build':
+        XML.SubElement(selector, 'upstreamProjectName').text = (
+            data['upstream-project-name'])
+        XML.SubElement(selector, 'upstreamBuildNumber').text = (
+            data['upstream-build-number'])
 
 
 def findbugs_settings(xml_parent, data):
     # General Options
-    rank_priority = str(data.get('rank-priority', False)).lower()
-    XML.SubElement(xml_parent, 'isRankActivated').text = rank_priority
-    include_files = data.get('include-files', '')
-    XML.SubElement(xml_parent, 'includePattern').text = include_files
-    exclude_files = data.get('exclude-files', '')
-    XML.SubElement(xml_parent, 'excludePattern').text = exclude_files
-    use_previous_build = str(data.get('use-previous-build-as-reference',
-                                      False)).lower()
-    XML.SubElement(xml_parent,
-                   'usePreviousBuildAsReference').text = use_previous_build
+    mapping = [
+        ('rank-priority', 'isRankActivated', False),
+        ('include-files', 'includePattern', ''),
+        ('exclude-files', 'excludePattern', ''),
+    ]
+    convert_mapping_to_xml(xml_parent, data, mapping, fail_required=True)
 
 
-def get_value_from_yaml_or_config_file(key, section, data, parser):
-    logger = logging.getLogger(__name__)
+def get_value_from_yaml_or_config_file(key, section, data, jjb_config):
     result = data.get(key, '')
     if result == '':
-        try:
-            result = parser.config.get(
-                section, key
-            )
-        except (configparser.NoSectionError, configparser.NoOptionError,
-                JenkinsJobsException) as e:
-            logger.warning("You didn't set a " + key +
-                           " neither in the yaml job definition nor in" +
-                           " the " + section + " section, blank default" +
-                           " value will be applied:\n{0}".format(e))
+        result = jjb_config.get_module_config(section, key)
     return result
 
 
@@ -321,57 +339,51 @@ def artifactory_optional_props(xml_parent, data, target):
             yaml_prop, '')
 
     common_bool_props = [
-        # xml property name, yaml property name, default value
-        ('deployArtifacts', 'deploy-artifacts', True),
-        ('discardOldBuilds', 'discard-old-builds', False),
-        ('discardBuildArtifacts', 'discard-build-artifacts', False),
-        ('deployBuildInfo', 'publish-build-info', False),
-        ('includeEnvVars', 'env-vars-include', False),
-        ('runChecks', 'run-checks', False),
-        ('includePublishArtifacts', 'include-publish-artifacts', False),
-        ('licenseAutoDiscovery', 'license-auto-discovery', True),
-        ('enableIssueTrackerIntegration', 'enable-issue-tracker-integration',
+        # yaml property name, xml property name, default value
+        ('deploy-artifacts', 'deployArtifacts', True),
+        ('discard-old-builds', 'discardOldBuilds', False),
+        ('discard-build-artifacts', 'discardBuildArtifacts', False),
+        ('publish-build-info', 'deployBuildInfo', False),
+        ('env-vars-include', 'includeEnvVars', False),
+        ('run-checks', 'runChecks', False),
+        ('include-publish-artifacts', 'includePublishArtifacts', False),
+        ('license-auto-discovery', 'licenseAutoDiscovery', True),
+        ('enable-issue-tracker-integration', 'enableIssueTrackerIntegration',
             False),
-        ('aggregateBuildIssues', 'aggregate-build-issues', False),
-        ('blackDuckRunChecks', 'black-duck-run-checks', False),
-        ('blackDuckIncludePublishedArtifacts',
-            'black-duck-include-published-artifacts', False),
-        ('autoCreateMissingComponentRequests',
-            'auto-create-missing-component-requests', True),
-        ('autoDiscardStaleComponentRequests',
-            'auto-discard-stale-component-requests', True),
-        ('filterExcludedArtifactsFromBuild',
-            'filter-excluded-artifacts-from-build', False)
+        ('aggregate-build-issues', 'aggregateBuildIssues', False),
+        ('black-duck-run-checks', 'blackDuckRunChecks', False),
+        ('black-duck-include-published-artifacts',
+            'blackDuckIncludePublishedArtifacts', False),
+        ('auto-create-missing-component-requests',
+            'autoCreateMissingComponentRequests', True),
+        ('auto-discard-stale-component-requests',
+            'autoDiscardStaleComponentRequests', True),
+        ('filter-excluded-artifacts-from-build',
+            'filterExcludedArtifactsFromBuild', False)
     ]
-
-    for (xml_prop, yaml_prop, default_value) in common_bool_props:
-        XML.SubElement(xml_parent, xml_prop).text = str(data.get(
-            yaml_prop, default_value)).lower()
+    convert_mapping_to_xml(
+        xml_parent, data, common_bool_props, fail_required=True)
 
     if 'wrappers' in target:
         wrapper_bool_props = [
-            ('enableResolveArtifacts', 'enable-resolve-artifacts', False),
-            ('disableLicenseAutoDiscovery',
-                'disable-license-auto-discovery', False),
-            ('recordAllDependencies',
-                'record-all-dependencies', False)
+            ('enable-resolve-artifacts', 'enableResolveArtifacts', False),
+            ('disable-license-auto-discovery',
+                'disableLicenseAutoDiscovery', False),
+            ('record-all-dependencies',
+                'recordAllDependencies', False)
         ]
-
-        for (xml_prop, yaml_prop, default_value) in wrapper_bool_props:
-            XML.SubElement(xml_parent, xml_prop).text = str(data.get(
-                yaml_prop, default_value)).lower()
+        convert_mapping_to_xml(
+            xml_parent, data, wrapper_bool_props, fail_required=True)
 
     if 'publishers' in target:
         publisher_bool_props = [
-            ('evenIfUnstable', 'even-if-unstable', False),
-            ('passIdentifiedDownstream', 'pass-identified-downstream', False),
-            ('allowPromotionOfNonStagedBuilds',
-                'allow-promotion-of-non-staged-builds', False)
+            ('even-if-unstable', 'evenIfUnstable', False),
+            ('pass-identified-downstream', 'passIdentifiedDownstream', False),
+            ('allow-promotion-of-non-staged-builds',
+                'allowPromotionOfNonStagedBuilds', False)
         ]
-
-        for (xml_prop, yaml_prop, default_value) in publisher_bool_props:
-            XML.SubElement(xml_parent, xml_prop).text = str(data.get(
-                yaml_prop, default_value)).lower()
+        convert_mapping_to_xml(
+            xml_parent, data, publisher_bool_props, fail_required=True)
 
 
 def artifactory_common_details(details, data):
@@ -397,16 +409,116 @@ def artifactory_repository(xml_parent, data, target):
             data.get('deploy-dynamic-mode', False)).lower()
 
 
-def convert_mapping_to_xml(parent, data, mapping):
+def append_git_revision_config(parent, config_def):
+    params = XML.SubElement(
+        parent, 'hudson.plugins.git.GitRevisionBuildParameters')
 
+    try:
+        # If git-revision is a boolean, the get() will
+        # throw an AttributeError
+        combine_commits = str(
+            config_def.get('combine-queued-commits', False)).lower()
+    except AttributeError:
+        combine_commits = 'false'
+
+    XML.SubElement(params, 'combineQueuedCommits').text = combine_commits
+
+
+def test_fairy_common(xml_element, data):
+    xml_element.set('plugin', 'TestFairy')
+    valid_max_duration = ['10m', '60m', '300m', '1440m']
+    valid_interval = [1, 2, 5]
+    valid_video_quality = ['high', 'medium', 'low']
+
+    mappings = [
+        # General
+        ('apikey', 'apiKey', None),
+        ('appfile', 'appFile', None),
+        ('tester-groups', 'testersGroups', ''),
+        ('notify-testers', 'notifyTesters', True),
+        ('autoupdate', 'autoUpdate', True),
+        # Session
+        ('max-duration', 'maxDuration', '10m', valid_max_duration),
+        ('record-on-background', 'recordOnBackground', False),
+        ('data-only-wifi', 'dataOnlyWifi', False),
+        # Video
+        ('video-enabled', 'isVideoEnabled', True),
+        ('screenshot-interval', 'screenshotInterval', 1, valid_interval),
+        ('video-quality', 'videoQuality', 'high', valid_video_quality),
+        # Metrics
+        ('cpu', 'cpu', True),
+        ('memory', 'memory', True),
+        ('logs', 'logs', True),
+        ('network', 'network', False),
+        ('phone-signal', 'phoneSignal', False),
+        ('wifi', 'wifi', False),
+        ('gps', 'gps', False),
+        ('battery', 'battery', False),
+        ('opengl', 'openGl', False),
+        # Advanced options
+        ('advanced-options', 'advancedOptions', '')
+    ]
+    convert_mapping_to_xml(xml_element, data, mappings, fail_required=True)
+
+
+def convert_mapping_to_xml(parent, data, mapping, fail_required=False):
+    """Convert mapping to XML
+
+    fail_required affects the last parameter of the mapping field when it's
+    parameter is set to 'None'. When fail_required is True then a 'None' value
+    represents a required configuration so will raise a MissingAttributeError
+    if the user does not provide the configuration.
+
+    If fail_required is False parameter is treated as optional. Logic will skip
+    configuring the XML tag for the parameter. We recommend for new plugins to
+    set fail_required=True and instead of optional parameters provide a default
+    value for all paramters that are not required instead.
+
+    valid_options provides a way to check if the value the user input is from a
+    list of available options. When the user pass a value that is not supported
+    from the list, it raise an InvalidAttributeError.
+
+    valid_dict provides a way to set options through their key and value. If
+    the user input corresponds to a key, the XML tag will use the key's value
+    for its element. When the user pass a value that there are no keys for,
+    it raise an InvalidAttributeError.
+    """
     for elem in mapping:
-        (optname, xmlname, val) = elem
+        (optname, xmlname, val) = elem[:3]
         val = data.get(optname, val)
+
+        valid_options = []
+        valid_dict = {}
+        if len(elem) == 4:
+            if type(elem[3]) is list:
+                valid_options = elem[3]
+            if type(elem[3]) is dict:
+                valid_dict = elem[3]
+
+        # Use fail_required setting to allow support for optional parameters
+        # we will phase this out in the future as we rework plugins so that
+        # optional parameters use a default setting instead.
+        if val is None and fail_required is True:
+            raise MissingAttributeError(optname)
+
+        # (Deprecated) in the future we will default to fail_required True
         # if no value is provided then continue else leave it
         # up to the user if they want to use an empty XML tag
-        if val is None:
+        if val is None and fail_required is False:
             continue
-        if str(val).lower() == 'true' or str(val).lower() == 'false':
+
+        if valid_dict:
+            if val not in valid_dict:
+                raise InvalidAttributeError(optname, val, valid_dict.keys())
+
+        if valid_options:
+            if val not in valid_options:
+                raise InvalidAttributeError(optname, val, valid_options)
+
+        if type(val) == bool:
             val = str(val).lower()
-        xe = XML.SubElement(parent, xmlname)
-        xe.text = str(val)
+
+        if val in valid_dict:
+            XML.SubElement(parent, xmlname).text = str(valid_dict[val])
+        else:
+            XML.SubElement(parent, xmlname).text = str(val)

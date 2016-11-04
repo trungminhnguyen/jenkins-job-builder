@@ -1,17 +1,15 @@
-import testtools as tt
 import pkg_resources
+
 from testtools.content import text_content
-from testscenarios.testcase import TestWithScenarios
-from six.moves import configparser, StringIO
+import testscenarios
 
-from jenkins_jobs import cmd
+from jenkins_jobs.config import JJBConfig
 from jenkins_jobs.registry import ModuleRegistry
-from tests.base import LoggingFixture
+from tests import base
 
 
-class ModuleRegistryPluginInfoTestsWithScenarios(TestWithScenarios,
-                                                 LoggingFixture,
-                                                 tt.TestCase):
+class ModuleRegistryPluginInfoTestsWithScenarios(
+        testscenarios.TestWithScenarios, base.BaseTestCase):
     scenarios = [
         ('s1', dict(v1='1.0.0', op='__gt__', v2='0.8.0')),
         ('s2', dict(v1='1.0.1alpha', op='__gt__', v2='1.0.0')),
@@ -31,8 +29,8 @@ class ModuleRegistryPluginInfoTestsWithScenarios(TestWithScenarios,
     def setUp(self):
         super(ModuleRegistryPluginInfoTestsWithScenarios, self).setUp()
 
-        config = configparser.ConfigParser()
-        config.readfp(StringIO(cmd.DEFAULT_CONF))
+        jjb_config = JJBConfig()
+        jjb_config.validate()
 
         plugin_info = [{'shortName': "HerpDerpPlugin",
                         'longName': "Blah Blah Blah Plugin"
@@ -43,7 +41,7 @@ class ModuleRegistryPluginInfoTestsWithScenarios(TestWithScenarios,
                             })
 
         self.addDetail("plugin_info", text_content(str(plugin_info)))
-        self.registry = ModuleRegistry(config, plugin_info)
+        self.registry = ModuleRegistry(jjb_config, plugin_info)
 
     def tearDown(self):
         super(ModuleRegistryPluginInfoTestsWithScenarios, self).tearDown()

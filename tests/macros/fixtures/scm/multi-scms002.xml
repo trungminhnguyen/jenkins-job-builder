@@ -10,7 +10,7 @@
   <properties/>
   <scm class="org.jenkinsci.plugins.multiplescms.MultiSCM">
     <scms>
-      <scm class="hudson.plugins.repo.RepoScm">
+      <hudson.plugins.repo.RepoScm>
         <manifestRepositoryUrl>https://example.com/project/</manifestRepositoryUrl>
         <manifestBranch>stable</manifestBranch>
         <manifestFile>repo.xml</manifestFile>
@@ -19,10 +19,20 @@
         <repoUrl>https://internal.net/projects/repo</repoUrl>
         <mirrorDir>~/git/project/</mirrorDir>
         <jobs>3</jobs>
+        <depth>2</depth>
         <currentBranch>false</currentBranch>
+        <resetFirst>false</resetFirst>
         <quiet>false</quiet>
-      </scm>
-      <scm class="hudson.plugins.git.GitSCM">
+        <forceSync>false</forceSync>
+        <noTags>false</noTags>
+        <trace>false</trace>
+        <showAllChanges>false</showAllChanges>
+        <localManifest/>
+        <ignoreProjects class="linked-hash-set">
+          <string/>
+        </ignoreProjects>
+      </hudson.plugins.repo.RepoScm>
+      <hudson.plugins.git.GitSCM>
         <configVersion>2</configVersion>
         <userRemoteConfigs>
           <hudson.plugins.git.UserRemoteConfig>
@@ -36,29 +46,19 @@
             <name>origin/master</name>
           </hudson.plugins.git.BranchSpec>
         </branches>
-        <excludedUsers/>
-        <buildChooser class="hudson.plugins.git.util.DefaultBuildChooser"/>
         <disableSubmodules>false</disableSubmodules>
         <recursiveSubmodules>false</recursiveSubmodules>
         <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
-        <authorOrCommitter>false</authorOrCommitter>
-        <wipeOutWorkspace>true</wipeOutWorkspace>
-        <pruneBranches>false</pruneBranches>
         <remotePoll>false</remotePoll>
         <gitTool>Default</gitTool>
         <submoduleCfg class="list"/>
-        <relativeTargetDir/>
         <reference/>
         <gitConfigName/>
         <gitConfigEmail/>
-        <skipTag>false</skipTag>
-        <scmName/>
-        <useShallowClone>false</useShallowClone>
-        <ignoreNotifyCommit>false</ignoreNotifyCommit>
         <extensions>
           <hudson.plugins.git.extensions.impl.WipeWorkspace/>
         </extensions>
-      </scm>
+      </hudson.plugins.git.GitSCM>
     </scms>
   </scm>
   <builders/>

@@ -38,14 +38,15 @@ Example of an empty ``scm``:
 
 import logging
 import xml.etree.ElementTree as XML
+
+from jenkins_jobs.errors import InvalidAttributeError
+from jenkins_jobs.errors import JenkinsJobsException
+from jenkins_jobs.errors import MissingAttributeError
 import jenkins_jobs.modules.base
 from jenkins_jobs.modules.helpers import convert_mapping_to_xml
-from jenkins_jobs.errors import (InvalidAttributeError,
-                                 JenkinsJobsException,
-                                 MissingAttributeError)
 
 
-def git(parser, xml_parent, data):
+def git(registry, xml_parent, data):
     """yaml: git
     Specifies the git SCM repository for this job.
     Requires the Jenkins :jenkins-wiki:`Git Plugin <Git+Plugin>`.
@@ -69,26 +70,11 @@ def git(parser, xml_parent, data):
               code) visible after you clicked credential under Jenkins Global
               credentials. (optional)
     :arg list(str) branches: list of branch specifiers to build (default '**')
-    :arg list(str) excluded-users: list of users to ignore revisions from
-        when polling for changes. (if polling is enabled, optional)
-    :arg list(str) included-regions: list of file/folders to include (optional)
-    :arg list(str) excluded-regions: list of file/folders to exclude (optional)
-    :arg str local-branch: Checkout/merge to local branch (optional)
-    :arg dict merge:
-        :merge:
-            * **remote** (`string`) - name of repo that contains branch to
-              merge to (default 'origin')
-            * **branch** (`string`) - name of the branch to merge to
-            * **strategy** (`string`) - merge strategy. Can be one of
-              'default', 'resolve', 'recursive', 'octopus', 'ours',
-              'subtree'. (default 'default')
-            * **fast-forward-mode** (`string`) - merge fast-forward mode.
-              Can be one of 'FF', 'FF_ONLY' or 'NO_FF'. (default 'FF')
-    :arg str basedir: location relative to the workspace root to clone to
-        (default workspace)
-    :arg bool skip-tag: Skip tagging (default false)
-    :arg bool shallow-clone: Perform shallow clone (default false)
-    :arg bool prune: Prune remote branches (default false)
+    :arg bool skip-tag: Skip tagging (default true)
+
+        .. deprecated:: 1.6.0. Please use per-build-tag extension, which has
+           the inverse meaning.
+
     :arg bool clean: Clean after checkout (default false)
 
         .. deprecated:: 1.1.1. Please use clean extension format.
@@ -103,21 +89,17 @@ def git(parser, xml_parent, data):
 
         .. deprecated:: 1.1.1. Please use submodule extension.
 
-    :arg bool use-author: Use author rather than committer in Jenkin's build
-        changeset (default false)
     :arg str git-tool: The name of the Git installation to use (default
         'Default')
     :arg str reference-repo: Path of the reference repo to use during clone
         (optional)
-    :arg str scm-name: The unique scm name for this Git SCM (optional)
-    :arg bool ignore-notify: Ignore notifyCommit URL accesses (default false)
     :arg str browser: what repository browser to use.
 
         :browsers supported:
             * **auto** - (default)
-            * **assemblaweb** - https://www.assembla.com/
-            * **bitbucketweb** - https://www.bitbucket.org/
-            * **cgit** - http://git.zx2c4.com/cgit/about/
+            * **assemblaweb** - https://www.assembla.com/home
+            * **bitbucketweb** - https://bitbucket.org/
+            * **cgit** - https://git.zx2c4.com/cgit/about/
             * **fisheye** - https://www.atlassian.com/software/fisheye
             * **gitblit** - http://gitblit.com/
             * **githubweb** - https://github.com/
@@ -125,13 +107,13 @@ def git(parser, xml_parent, data):
             * **gitlab** - https://about.gitlab.com/
             * **gitlist** - http://gitlist.org/
             * **gitoriousweb** - https://gitorious.org/
-            * **gitweb** - http://git-scm.com/docs/gitweb
+            * **gitweb** - https://git-scm.com/docs/gitweb
             * **kiln** - https://www.fogcreek.com/kiln/
             * **microsoft\-tfs\-2013** - |tfs_2013|
             * **phabricator** - http://phabricator.org/
             * **redmineweb** - http://www.redmine.org/
             * **rhodecode** - https://rhodecode.com/
-            * **stash** - https://www.atlassian.com/software/stash
+            * **stash** - https://www.atlassian.com/software/bitbucket/server
             * **viewgit** - http://viewgit.fealdia.org/
     :arg str browser-url: url for the repository browser (required if browser
         is not 'auto', no default)
@@ -140,25 +122,54 @@ def git(parser, xml_parent, data):
     :arg str project-name: project name in Gitblit and ViewGit repobrowser
         (optional)
     :arg str repo-name: repository name in phabricator repobrowser (optional)
-    :arg str choosing-strategy: Jenkins class for selecting what to build.
-        Can be one of `default`, `inverse`, or `gerrit` (default 'default')
     :arg str git-config-name: Configure name for Git clone (optional)
     :arg str git-config-email: Configure email for Git clone (optional)
 
     :extensions:
 
+        * **basedir** (`string`) - Location relative to the workspace root to
+            clone to (default workspace)
         * **changelog-against** (`dict`)
             * **remote** (`string`) - name of repo that contains branch to
               create changelog against (default 'origin')
             * **branch** (`string`) - name of the branch to create changelog
               against (default 'master')
+        * **choosing-strategy**: (`string`) - Jenkins class for selecting what
+            to build. Can be one of `default`,`inverse`, or `gerrit`
+            (default 'default')
         * **clean** (`dict`)
             * **after** (`bool`) - Clean the workspace after checkout
             * **before** (`bool`) - Clean the workspace before checkout
+        * **excluded-users**: (`list(string)`) - list of users to ignore
+            revisions from when polling for changes.
+            (if polling is enabled, optional)
+        * **included-regions**: (`list(string)`) - list of file/folders to
+            include (optional)
+        * **excluded-regions**: (`list(string)`) - list of file/folders to
+            exclude (optional)
         * **ignore-commits-with-messages** (`list(str)`) - Revisions committed
-          with messages matching these patterns will be ignored. (optional)
+            with messages matching these patterns will be ignored. (optional)
+        * **ignore-notify**: (`bool`) - Ignore notifyCommit URL accesses
+            (default false)
         * **force-polling-using-workspace** (`bool`) - Force polling using
-          workspace (default false)
+            workspace (default false)
+        * **local-branch** (`string`) - Checkout/merge to local branch
+            (optional)
+        * **merge** (`dict`)
+            * **remote** (`string`) - name of repo that contains branch to
+              merge to (default 'origin')
+            * **branch** (`string`) - name of the branch to merge to
+            * **strategy** (`string`) - merge strategy. Can be one of
+              'default', 'resolve', 'recursive', 'octopus', 'ours',
+              'subtree'. (default 'default')
+            * **fast-forward-mode** (`string`) - merge fast-forward mode.
+              Can be one of 'FF', 'FF_ONLY' or 'NO_FF'. (default 'FF')
+        * **per-build-tag** (`bool`) - Create a tag in the workspace for every
+            build. (default is inverse of skip-tag if set, otherwise false)
+        * **prune** (`bool`) - Prune remote branches (default false)
+        * **scm-name** (`string`) - The unique scm name for this Git SCM
+            (optional)
+        * **shallow-clone** (`bool`) - Perform shallow clone (default false)
         * **sparse-checkout** (`dict`)
             * **paths** (`list`) - List of paths to sparse checkout. (optional)
         * **submodule** (`dict`)
@@ -170,9 +181,13 @@ def git(parser, xml_parent, data):
             * **tracking** (`bool`) - Retrieve the tip of the configured
               branch in .gitmodules (Uses '\-\-remote' option which requires
               git>=1.8.2)
+            * **reference-repo** (`str`) - Path of the reference repo to use
+              during clone (optional)
             * **timeout** (`int`) - Specify a timeout (in minutes) for
-              submodules operations (default: 10).
+              submodules operations (default 10).
         * **timeout** (`str`) - Timeout for git commands in minutes (optional)
+        * **use-author** (`bool`): Use author rather than committer in Jenkin's
+            build changeset (default false)
         * **wipe-workspace** (`bool`) - Wipe out workspace before build
             (default true)
 
@@ -194,20 +209,14 @@ def git(parser, xml_parent, data):
         ("disable-submodules", 'disableSubmodules', False),
         ("recursive-submodules", 'recursiveSubmodules', False),
         (None, 'doGenerateSubmoduleConfigurations', False),
-        ("use-author", 'authorOrCommitter', False),
-        ("wipe-workspace", 'wipeOutWorkspace', True),
-        ("prune", 'pruneBranches', False),
+        # XXX is this the same as force-polling-using-workspace?
         ("fastpoll", 'remotePoll', False),
+        # XXX does this option still exist?
         ("git-tool", 'gitTool', "Default"),
         (None, 'submoduleCfg', '', {'class': 'list'}),
-        ('basedir', 'relativeTargetDir', ''),
         ('reference-repo', 'reference', ''),
         ("git-config-name", 'gitConfigName', ''),
         ("git-config-email", 'gitConfigEmail', ''),
-        ('skip-tag', 'skipTag', False),
-        ('scm-name', 'scmName', ''),
-        ("shallow-clone", "useShallowClone", False),
-        ("ignore-notify", "ignoreNotifyCommit", False),
     ]
 
     choosing_strategies = {
@@ -247,36 +256,6 @@ def git(parser, xml_parent, data):
     for branch in branches:
         bspec = XML.SubElement(xml_branches, 'hudson.plugins.git.BranchSpec')
         XML.SubElement(bspec, 'name').text = branch
-    excluded_users = '\n'.join(data.get('excluded-users', []))
-    XML.SubElement(scm, 'excludedUsers').text = excluded_users
-    if 'merge' in data:
-        merge = data['merge']
-        merge_strategies = ['default', 'resolve', 'recursive', 'octopus',
-                            'ours', 'subtree']
-        fast_forward_modes = ['FF', 'FF_ONLY', 'NO_FF']
-        name = merge.get('remote', 'origin')
-        branch = merge['branch']
-        urc = XML.SubElement(scm, 'userMergeOptions')
-        XML.SubElement(urc, 'mergeRemote').text = name
-        XML.SubElement(urc, 'mergeTarget').text = branch
-        strategy = merge.get('strategy', 'default')
-        if strategy not in merge_strategies:
-            raise InvalidAttributeError('strategy', strategy, merge_strategies)
-        XML.SubElement(urc, 'mergeStrategy').text = strategy
-        fast_forward_mode = merge.get('fast-forward-mode', 'FF')
-        if fast_forward_mode not in fast_forward_modes:
-            raise InvalidAttributeError('fast-forward-mode', fast_forward_mode,
-                                        fast_forward_modes)
-        XML.SubElement(urc, 'fastForwardMode').text = fast_forward_mode
-
-    try:
-        choosing_strategy = choosing_strategies[data.get('choosing-strategy',
-                                                         'default')]
-    except KeyError:
-        raise ValueError('Invalid choosing-strategy %r' %
-                         data.get('choosing-strategy'))
-    XML.SubElement(scm, 'buildChooser', {'class': choosing_strategy})
-
     for elem in mapping:
         (optname, xmlname, val) = elem[:3]
 
@@ -285,10 +264,11 @@ def git(parser, xml_parent, data):
         submodule_cfgs = ['disable-submodules', 'recursive-submodules']
         if optname in submodule_cfgs:
             if optname in data:
-                logger.warn("'{0}' is deprecated, please convert to use the "
-                            "'submodule' section instead as support for this "
-                            "top level option will be removed in a future "
-                            "release.".format(optname))
+                logger.warning(
+                    "'{0}' is deprecated, please convert to use the "
+                    "'submodule' section instead as support for this "
+                    "top level option will be removed in a future "
+                    "release.".format(optname))
             if 'submodule' in data:
                 continue
 
@@ -303,21 +283,13 @@ def git(parser, xml_parent, data):
         else:
             xe.text = val
 
-    if 'local-branch' in data:
-        XML.SubElement(scm, 'localBranch').text = data['local-branch']
-
     exts_node = XML.SubElement(scm, 'extensions')
     impl_prefix = 'hudson.plugins.git.extensions.impl.'
-    if 'included-regions' in data or 'excluded-regions' in data:
-        ext_name = XML.SubElement(exts_node,
-                                  'hudson.plugins.git.extensions.impl.'
-                                  'PathRestriction')
-        if 'included-regions' in data:
-            include_string = '\n'.join(data['included-regions'])
-            XML.SubElement(ext_name, 'includedRegions').text = include_string
-        if 'excluded-regions' in data:
-            exclude_string = '\n'.join(data['excluded-regions'])
-            XML.SubElement(ext_name, 'excludedRegions').text = exclude_string
+
+    if 'basedir' in data:
+        ext = XML.SubElement(exts_node,
+                             impl_prefix + 'RelativeTargetDirectory')
+        XML.SubElement(ext, 'relativeTargetDir').text = data['basedir']
     if 'changelog-against' in data:
         ext_name = impl_prefix + 'ChangelogToBranch'
         ext = XML.SubElement(exts_node, ext_name)
@@ -326,15 +298,25 @@ def git(parser, xml_parent, data):
         change_branch = data['changelog-against'].get('branch', 'master')
         XML.SubElement(opts, 'compareRemote').text = change_remote
         XML.SubElement(opts, 'compareTarget').text = change_branch
+    if 'choosing-strategy' in data:
+        try:
+            choosing_strategy = choosing_strategies[
+                data.get('choosing-strategy')]
+        except KeyError:
+            raise ValueError('Invalid choosing-strategy %r' %
+                             data.get('choosing-strategy'))
+        ext = XML.SubElement(exts_node, impl_prefix + 'BuildChooserSetting')
+        XML.SubElement(ext, 'buildChooser', {'class': choosing_strategy})
     if 'clean' in data:
         # Keep support for old format 'clean' configuration by checking
         # if 'clean' is boolean. Else we're using the new extensions style.
         if isinstance(data['clean'], bool):
             clean_after = data['clean']
             clean_before = False
-            logger.warn("'clean: bool' configuration format is deprecated, "
-                        "please use the extension style format to configure "
-                        "this option.")
+            logger.warning(
+                "'clean: bool' configuration format is deprecated, "
+                "please use the extension style format to configure "
+                "this option.")
         else:
             clean_after = data['clean'].get('after', False)
             clean_before = data['clean'].get('before', False)
@@ -344,11 +326,57 @@ def git(parser, xml_parent, data):
         if clean_before:
             ext_name = impl_prefix + 'CleanBeforeCheckout'
             ext = XML.SubElement(exts_node, ext_name)
+    if 'excluded-users' in data:
+        excluded_users = '\n'.join(data['excluded-users'])
+        ext = XML.SubElement(exts_node, impl_prefix + 'UserExclusion')
+        XML.SubElement(ext, 'excludedUsers').text = excluded_users
+    if 'included-regions' in data or 'excluded-regions' in data:
+        ext = XML.SubElement(exts_node,
+                             'hudson.plugins.git.extensions.impl.'
+                             'PathRestriction')
+        if 'included-regions' in data:
+            include_string = '\n'.join(data['included-regions'])
+            XML.SubElement(ext, 'includedRegions').text = include_string
+        if 'excluded-regions' in data:
+            exclude_string = '\n'.join(data['excluded-regions'])
+            XML.SubElement(ext, 'excludedRegions').text = exclude_string
     if 'ignore-commits-with-messages' in data:
         for msg in data['ignore-commits-with-messages']:
             ext_name = impl_prefix + 'MessageExclusion'
             ext = XML.SubElement(exts_node, ext_name)
             XML.SubElement(ext, 'excludedMessage').text = msg
+    if 'local-branch' in data:
+        ext = XML.SubElement(exts_node, impl_prefix + 'LocalBranch')
+        XML.SubElement(ext, 'localBranch').text = str(data['local-branch'])
+    if 'merge' in data:
+        merge = data['merge']
+        merge_strategies = ['default', 'resolve', 'recursive', 'octopus',
+                            'ours', 'subtree']
+        fast_forward_modes = ['FF', 'FF_ONLY', 'NO_FF']
+        name = merge.get('remote', 'origin')
+        branch = merge['branch']
+        ext = XML.SubElement(exts_node, impl_prefix + 'PreBuildMerge')
+        merge_opts = XML.SubElement(ext, 'options')
+        XML.SubElement(merge_opts, 'mergeRemote').text = name
+        XML.SubElement(merge_opts, 'mergeTarget').text = branch
+        strategy = merge.get('strategy', 'default')
+        if strategy not in merge_strategies:
+            raise InvalidAttributeError('strategy', strategy, merge_strategies)
+        XML.SubElement(merge_opts, 'mergeStrategy').text = strategy
+        fast_forward_mode = merge.get('fast-forward-mode', 'FF')
+        if fast_forward_mode not in fast_forward_modes:
+            raise InvalidAttributeError('fast-forward-mode', fast_forward_mode,
+                                        fast_forward_modes)
+        XML.SubElement(merge_opts, 'fastForwardMode').text = fast_forward_mode
+    if 'scm-name' in data:
+        ext = XML.SubElement(exts_node, impl_prefix + 'ScmName')
+        XML.SubElement(ext, 'name').text = str(data['scm-name'])
+    if 'shallow-clone' in data or 'timeout' in data:
+        clo = XML.SubElement(exts_node, impl_prefix + 'CloneOption')
+        XML.SubElement(clo, 'shallow').text = str(
+            data.get('shallow-clone', False)).lower()
+        if 'timeout' in data:
+            XML.SubElement(clo, 'timeout').text = str(data['timeout'])
     if 'sparse-checkout' in data:
         ext_name = impl_prefix + 'SparseCheckoutPaths'
         ext = XML.SubElement(exts_node, ext_name)
@@ -368,23 +396,46 @@ def git(parser, xml_parent, data):
             data['submodule'].get('recursive', False)).lower()
         XML.SubElement(ext, 'trackingSubmodules').text = str(
             data['submodule'].get('tracking', False)).lower()
+        XML.SubElement(ext, 'reference').text = str(
+            data['submodule'].get('reference-repo', ''))
         XML.SubElement(ext, 'timeout').text = str(
             data['submodule'].get('timeout', 10))
     if 'timeout' in data:
         co = XML.SubElement(exts_node, impl_prefix + 'CheckoutOption')
         XML.SubElement(co, 'timeout').text = str(data['timeout'])
-        clo = XML.SubElement(exts_node, impl_prefix + 'CloneOption')
-        XML.SubElement(clo, 'timeout').text = str(data['timeout'])
+
     polling_using_workspace = str(data.get('force-polling-using-workspace',
                                            False)).lower()
     if polling_using_workspace == 'true':
         ext_name = impl_prefix + 'DisableRemotePoll'
         ext = XML.SubElement(exts_node, ext_name)
+    if 'per-build-tag' in data or 'skip-tag' in data:
+        # We want to support both skip-tag (the old option) and per-build-tag
+        # (the new option), with the new one overriding the old one.
+        # Unfortunately they have inverse meanings, so we have to be careful.
+        # The default value of per-build-tag is False if skip-tag is not set,
+        # so we set the default value of skip-tag to True.
+        per_build_tag_default = False
+        if str(data.get('skip-tag', True)).lower == 'false':
+            per_build_tag_default = True
+        if str(data.get('per-build-tag',
+                        per_build_tag_default)).lower() == 'true':
+            XML.SubElement(exts_node, impl_prefix + 'PerBuildTag')
+    prune = str(data.get('prune', False)).lower()
+    if prune == 'true':
+        XML.SubElement(exts_node, impl_prefix + 'PruneStaleBranch')
+    ignore_notify_commits = str(data.get('ignore-notify', False)).lower()
+    if ignore_notify_commits == 'true':
+        XML.SubElement(exts_node, impl_prefix + 'IgnoreNotifyCommit')
     # By default we wipe the workspace
     wipe_workspace = str(data.get('wipe-workspace', True)).lower()
     if wipe_workspace == 'true':
         ext_name = impl_prefix + 'WipeWorkspace'
         ext = XML.SubElement(exts_node, ext_name)
+
+    use_author = str(data.get('use-author', False)).lower()
+    if use_author == 'true':
+        XML.SubElement(exts_node, impl_prefix + 'AuthorInChangelog')
 
     browser = data.get('browser', 'auto')
     browserdict = {'auto': 'auto',
@@ -427,7 +478,7 @@ def git(parser, xml_parent, data):
                 data.get('repo-name', ''))
 
 
-def cvs(parser, xml_parent, data):
+def cvs(registry, xml_parent, data):
     """yaml: cvs
     Specifies the CVS SCM repository for this job.
     Requires the Jenkins :jenkins-wiki:`CVS Plugin <CVS+Plugin>`.
@@ -545,41 +596,54 @@ def cvs(parser, xml_parent, data):
             raise InvalidAttributeError('compression-level',
                                         compression_level, range(-1, 10))
         XML.SubElement(repo_tag, 'compressionLevel').text = compression_level
-    mapping = [('use-update', 'canUseUpdate', True),
-               ('prune-empty', 'pruneEmptyDirectories', True),
-               ('skip-changelog', 'skipChangeLog', False),
-               ('show-all-output', 'disableCvsQuiet', False),
-               ('clean-checkout', 'cleanOnFailedUpdate', False),
-               ('clean-copy', 'forceCleanCopy', False)]
-    for elem in mapping:
-        opt, xml_tag, val = elem[:]
-        XML.SubElement(cvs, xml_tag).text = str(
-            data.get(opt, val)).lower()
+    mappings = [
+        ('use-update', 'canUseUpdate', True),
+        ('prune-empty', 'pruneEmptyDirectories', True),
+        ('skip-changelog', 'skipChangeLog', False),
+        ('show-all-output', 'disableCvsQuiet', False),
+        ('clean-checkout', 'cleanOnFailedUpdate', False),
+        ('clean-copy', 'forceCleanCopy', False)]
+    convert_mapping_to_xml(cvs, data, mappings, fail_required=True)
 
 
-def repo(parser, xml_parent, data):
+def repo(registry, xml_parent, data):
     """yaml: repo
     Specifies the repo SCM repository for this job.
     Requires the Jenkins :jenkins-wiki:`Repo Plugin <Repo+Plugin>`.
 
-    :arg str manifest-url: URL of the repo manifest
-    :arg str manifest-branch: The branch of the manifest to use (optional)
+    :arg str manifest-url: URL of the repo manifest (required)
+    :arg str manifest-branch: The branch of the manifest to use (default '')
     :arg str manifest-file: Initial manifest file to use when initialising
-        (optional)
+        (default '')
     :arg str manifest-group: Only retrieve those projects in the manifest
-        tagged with the provided group name (optional)
+        tagged with the provided group name (default '')
+    :arg list(str) ignore-projects: a list of projects in which changes would
+        not be considered to trigger a build when pooling (default '')
     :arg str destination-dir: Location relative to the workspace root to clone
-        under (optional)
-    :arg str repo-url: custom url to retrieve the repo application (optional)
+        under (default '')
+    :arg str repo-url: custom url to retrieve the repo application (default '')
     :arg str mirror-dir: Path to mirror directory to reference when
-        initialising (optional)
+        initialising (default '')
     :arg int jobs: Number of projects to fetch simultaneously (default 0)
+    :arg int depth: Specify the depth in history to sync from the source. The
+        default is to sync all of the history. Use 1 to just sync the most
+        recent commit (default 0)
     :arg bool current-branch: Fetch only the current branch from the server
         (default true)
+    :arg bool reset-first: Remove any commits that are not on the repositories
+        by running the following command before anything else (default false):
+        ``repo forall -c "git reset --hard"``
     :arg bool quiet: Make repo more quiet
         (default true)
+    :arg bool force-sync: Continue sync even if a project fails to sync
+        (default false)
+    :arg bool no-tags: Don't fetch tags (default false)
+    :arg bool trace: Trace git command execution into the build logs. (default
+        false)
+    :arg bool show-all-changes: When this is checked --first-parent is no
+        longer passed to git log when determining changesets (default false)
     :arg str local-manifest: Contents of .repo/local_manifest.xml, written
-        prior to calling sync (optional)
+        prior to calling sync (default '')
 
     Example:
 
@@ -589,40 +653,37 @@ def repo(parser, xml_parent, data):
     scm = XML.SubElement(xml_parent,
                          'scm', {'class': 'hudson.plugins.repo.RepoScm'})
 
-    if 'manifest-url' in data:
-        XML.SubElement(scm, 'manifestRepositoryUrl').text = \
-            data['manifest-url']
-    else:
-        raise JenkinsJobsException("Must specify a manifest url")
-
     mapping = [
         # option, xml name, default value
-        ("manifest-branch", 'manifestBranch', ''),
-        ("manifest-file", 'manifestFile', ''),
-        ("manifest-group", 'manifestGroup', ''),
-        ("destination-dir", 'destinationDir', ''),
-        ("repo-url", 'repoUrl', ''),
-        ("mirror-dir", 'mirrorDir', ''),
-        ("jobs", 'jobs', 0),
-        ("current-branch", 'currentBranch', True),
-        ("quiet", 'quiet', True),
-        ("local-manifest", 'localManifest', ''),
+        ('manifest-url', 'manifestRepositoryUrl', None),
+        ('manifest-branch', 'manifestBranch', ''),
+        ('manifest-file', 'manifestFile', ''),
+        ('manifest-group', 'manifestGroup', ''),
+        ('destination-dir', 'destinationDir', ''),
+        ('repo-url', 'repoUrl', ''),
+        ('mirror-dir', 'mirrorDir', ''),
+        ('jobs', 'jobs', 0),
+        ('depth', 'depth', 0),
+        ('current-branch', 'currentBranch', True),
+        ('reset-first', 'resetFirst', False),
+        ('quiet', 'quiet', True),
+        ('force-sync', 'forceSync', False),
+        ('no-tags', 'noTags', False),
+        ('trace', 'trace', False),
+        ('show-all-changes', 'showAllChanges', False),
+        ('local-manifest', 'localManifest', ''),
     ]
+    convert_mapping_to_xml(scm, data, mapping, fail_required=True)
 
-    for elem in mapping:
-        (optname, xmlname, val) = elem
-        val = data.get(optname, val)
-        # Skip adding xml entry if default is empty string and no value given
-        if not val and elem[2] is '':
-            continue
-        xe = XML.SubElement(scm, xmlname)
-        if type(elem[2]) == bool:
-            xe.text = str(val).lower()
-        else:
-            xe.text = str(val)
+    # ignore-projects does not follow the same pattern of the other parameters,
+    # so process it here:
+    ip = XML.SubElement(scm, 'ignoreProjects', {'class': 'linked-hash-set'})
+    ignored_projects = data.get('ignore-projects', [''])
+    for ignored_project in ignored_projects:
+        XML.SubElement(ip, 'string').text = str(ignored_project)
 
 
-def store(parser, xml_parent, data):
+def store(registry, xml_parent, data):
     """yaml: store
     Specifies the Visualworks Smalltalk Store repository for this job.
     Requires the Jenkins :jenkins-wiki:`Visualworks Smalltalk Store Plugin
@@ -684,7 +745,7 @@ def store(parser, xml_parent, data):
         XML.SubElement(scm, 'generateParcelBuilderInputFile').text = 'false'
 
 
-def svn(parser, xml_parent, data):
+def svn(registry, xml_parent, data):
     """yaml: svn
     Specifies the svn SCM repository for this job.
 
@@ -811,7 +872,7 @@ def svn(parser, xml_parent, data):
             xe.text = str(val)
 
 
-def tfs(parser, xml_parent, data):
+def tfs(registry, xml_parent, data):
     """yaml: tfs
     Specifies the Team Foundation Server repository for this job.
     Requires the Jenkins :jenkins-wiki:`Team Foundation Server Plugin
@@ -909,7 +970,7 @@ def tfs(parser, xml_parent, data):
                                                   'Browser'})
 
 
-def workspace(parser, xml_parent, data):
+def workspace(registry, xml_parent, data):
     """yaml: workspace
     Specifies the cloned workspace for this job to use as a SCM source.
     Requires the Jenkins :jenkins-wiki:`Clone Workspace SCM Plugin
@@ -922,7 +983,7 @@ def workspace(parser, xml_parent, data):
         workspace from.
     :arg str criteria: Set the criteria to determine what build of the parent
         project to use. Can be one of 'Any', 'Not Failed' or 'Successful'.
-        (default: Any)
+        (default Any)
 
 
     Example:
@@ -970,7 +1031,7 @@ def hg(self, xml_parent, data):
 
         :browsers supported:
             * **auto** - (default)
-            * **bitbucketweb** - https://www.bitbucket.org/
+            * **bitbucketweb** - https://bitbucket.org/
             * **fisheye** - https://www.atlassian.com/software/fisheye
             * **googlecode** - https://code.google.com/
             * **hgweb** - https://www.selenic.com/hg/help/hgweb
@@ -1049,7 +1110,7 @@ def hg(self, xml_parent, data):
                                        "with browser.")
 
 
-def openshift_img_streams(parser, xml_parent, data):
+def openshift_img_streams(registry, xml_parent, data):
     """yaml: openshift-img-streams
     Rather than a Build step extension plugin, this is an extension of the
     Jenkins SCM plugin, where this baked-in polling mechanism provided by
@@ -1057,22 +1118,24 @@ def openshift_img_streams(parser, xml_parent, data):
     OpenShift ImageStreams (which are abstractions of Docker repositories)
     and SCMs - versions / commit IDs of related artifacts
     (images vs. programmatics files)
-    Requires the Jenkins `OpenShift3 Plugin
-    <https://github.com/gabemontero/openshift-jenkins-buildutils/>`_
+    Requires the Jenkins :jenkins-wiki:`OpenShift
+    Pipeline Plugin <OpenShift+Pipeline+Plugin>`._
 
     :arg str image-stream-name: The name of the ImageStream is what shows up
         in the NAME column if you dump all the ImageStream's with the
-        `oc get is` command invocation. (default: nodejs-010-centos7)
+        `oc get is` command invocation. (default nodejs-010-centos7)
     :arg str tag: The specific image tag within the ImageStream to monitor.
-        (default: latest)
+        (default latest)
     :arg str api-url: This would be the value you specify if you leverage the
         --server option on the OpenShift `oc` command.
-        (default: \https://openshift.default.svc.cluster.local\)
+        (default \https://openshift.default.svc.cluster.local\)
     :arg str namespace: The value here should be whatever was the output
         form `oc project` when you created the BuildConfig you want to run
-        a Build on. (default: test)
+        a Build on. (default test)
     :arg str auth-token: The value here is what you supply with the --token
-        option when invoking the OpenShift `oc` command. (optional)
+        option when invoking the OpenShift `oc` command. (default '')
+    :arg bool verbose: This flag is the toggle for
+        turning on or off detailed logging in this plug-in. (default false)
 
     Full Example:
 
@@ -1088,7 +1151,7 @@ def openshift_img_streams(parser, xml_parent, data):
     """
     scm = XML.SubElement(xml_parent,
                          'scm', {'class':
-                                 'com.openshift.openshiftjenkinsbuildutils.'
+                                 'com.openshift.jenkins.plugins.pipeline.'
                                  'OpenShiftImageStreams'})
     mapping = [
         # option, xml name, default value
@@ -1097,9 +1160,100 @@ def openshift_img_streams(parser, xml_parent, data):
         ("api-url", 'apiURL', 'https://openshift.default.svc.cluster.local'),
         ("namespace", 'namespace', 'test'),
         ("auth-token", 'authToken', ''),
+        ("verbose", 'verbose', False),
     ]
+    convert_mapping_to_xml(scm, data, mapping, fail_required=True)
 
-    convert_mapping_to_xml(scm, data, mapping)
+
+def bzr(registry, xml_parent, data):
+    """yaml: bzr
+    Specifies the bzr SCM repository for this job.
+    Requires the Jenkins :jenkins-wiki:`Bazaar Plugin <Bazaar+Plugin>`.
+
+    :arg str url: URL of the bzr branch (required)
+    :arg bool clean-tree: Clean up the workspace (using bzr) before pulling
+        the branch (default false)
+    :arg bool lightweight-checkout: Use a lightweight checkout instead of a
+        full branch (default false)
+    :arg str browser: The repository browser to use.
+
+        :browsers supported:
+            * **auto** - (default)
+            * **loggerhead** - as used by Launchpad
+            * **opengrok** - https://opengrok.github.io/OpenGrok/
+
+    :arg str browser-url:
+        URL for the repository browser (required if browser is set).
+
+    :arg str opengrok-root-module:
+        Root module for OpenGrok (required if browser is opengrok).
+
+    Example:
+
+    .. literalinclude:: /../../tests/scm/fixtures/bzr001.yaml
+       :language: yaml
+    """
+    mapping = [
+        # option, xml name, default value (text), attributes (hard coded)
+        ('url', 'source', None),
+        ('clean-tree', 'cleantree', False),
+        ('lightweight-checkout', 'checkout', False),
+    ]
+    scm_element = XML.SubElement(
+        xml_parent, 'scm', {'class': 'hudson.plugins.bazaar.BazaarSCM'})
+    convert_mapping_to_xml(scm_element, data, mapping, fail_required=True)
+
+    browser_name_to_class = {
+        'loggerhead': 'Loggerhead',
+        'opengrok': 'OpenGrok',
+    }
+    browser = data.get('browser', 'auto')
+    if browser == 'auto':
+        return
+    if browser not in browser_name_to_class:
+        raise InvalidAttributeError('browser', browser,
+                                    browser_name_to_class.keys())
+    browser_element = XML.SubElement(
+        scm_element,
+        'browser',
+        {'class': 'hudson.plugins.bazaar.browsers.{0}'.format(
+            browser_name_to_class[browser])})
+    XML.SubElement(browser_element, 'url').text = data['browser-url']
+    if browser == 'opengrok':
+        XML.SubElement(browser_element, 'rootModule').text = (
+            data['opengrok-root-module'])
+
+
+def url(registry, xml_parent, data):
+    """yaml: url
+
+    Watch for changes in, and download an artifact from a particular url.
+    Requires the Jenkins :jenkins-wiki:`URL SCM <URL+SCM>`.
+
+    :arg list url-list: List of URLs to watch. (required)
+    :arg bool clear-workspace: If set to true, clear the workspace before
+        downloading the artifact(s) specified in url-list. (default false)
+
+    Examples:
+
+    .. literalinclude:: ../../tests/scm/fixtures/url001.yaml
+       :language: yaml
+    .. literalinclude:: ../../tests/scm/fixtures/url002.yaml
+       :language: yaml
+    """
+
+    scm = XML.SubElement(xml_parent, 'scm', {'class':
+                         'hudson.plugins.URLSCM.URLSCM'})
+    urls = XML.SubElement(scm, 'urls')
+    try:
+        for data_url in data['url-list']:
+            url_tuple = XML.SubElement(
+                urls, 'hudson.plugins.URLSCM.URLSCM_-URLTuple')
+            XML.SubElement(url_tuple, 'urlString').text = data_url
+    except KeyError as e:
+        raise MissingAttributeError(e.args[0])
+    XML.SubElement(scm, 'clearWorkspace').text = str(
+        data.get('clear-workspace', False)).lower()
 
 
 class SCM(jenkins_jobs.modules.base.Base):
@@ -1108,10 +1262,10 @@ class SCM(jenkins_jobs.modules.base.Base):
     component_type = 'scm'
     component_list_type = 'scm'
 
-    def gen_xml(self, parser, xml_parent, data):
+    def gen_xml(self, xml_parent, data):
         scms_parent = XML.Element('scms')
         for scm in data.get('scm', []):
-            self.registry.dispatch('scm', parser, scms_parent, scm)
+            self.registry.dispatch('scm', scms_parent, scm)
         scms_count = len(scms_parent)
         if scms_count == 0:
             XML.SubElement(xml_parent, 'scm', {'class': 'hudson.scm.NullSCM'})
@@ -1121,4 +1275,12 @@ class SCM(jenkins_jobs.modules.base.Base):
             class_name = 'org.jenkinsci.plugins.multiplescms.MultiSCM'
             xml_attribs = {'class': class_name}
             xml_parent = XML.SubElement(xml_parent, 'scm', xml_attribs)
+
+            for scms_child in scms_parent:
+                try:
+                    scms_child.tag = scms_child.attrib['class']
+                    del(scms_child.attrib['class'])
+                except KeyError:
+                    pass
+
             xml_parent.append(scms_parent)
