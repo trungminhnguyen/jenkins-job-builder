@@ -16,12 +16,10 @@
 # under the License.
 
 import os
-from testtools import TestCase
-from testscenarios.testcase import TestWithScenarios
-from tests.base import get_scenarios, SingleJobTestCase
+
+from tests import base
 
 
-class TestCaseModuleYamlInclude(TestWithScenarios,
-                                SingleJobTestCase, TestCase):
+class TestCaseModuleYamlInclude(base.SingleJobTestCase):
     fixtures_path = os.path.join(os.path.dirname(__file__), 'fixtures')
-    scenarios = get_scenarios(fixtures_path)
+    scenarios = base.get_scenarios(fixtures_path)

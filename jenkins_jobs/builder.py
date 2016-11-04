@@ -16,110 +16,52 @@
 # Manage jobs in Jenkins server
 
 import errno
-import io
-import os
-import operator
 import hashlib
-import yaml
-import xml.etree.ElementTree as XML
-import jenkins
-import re
-from pprint import pformat
+import io
 import logging
+import operator
+import os
+from pprint import pformat
+import re
+import time
+import xml.etree.ElementTree as XML
 
+import jenkins
+
+from jenkins_jobs.cache import JobCache
 from jenkins_jobs.constants import MAGIC_MANAGE_STRING
-from jenkins_jobs.parser import YamlParser
+from jenkins_jobs.parallel import concurrent
 from jenkins_jobs import utils
+
+__all__ = [
+    "JenkinsManager"
+]
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_TIMEOUT = object()
 
 
-class CacheStorage(object):
-    # ensure each instance of the class has a reference to the required
-    # modules so that they are available to be used when the destructor
-    # is being called since python will not guarantee that it won't have
-    # removed global module references during teardown.
-    _yaml = yaml
-    _logger = logger
+class JenkinsManager(object):
 
-    def __init__(self, jenkins_url, flush=False):
-        cache_dir = self.get_cache_dir()
-        # One cache per remote Jenkins URL:
-        host_vary = re.sub('[^A-Za-z0-9\-\~]', '_', jenkins_url)
-        self.cachefilename = os.path.join(
-            cache_dir, 'cache-host-jobs-' + host_vary + '.yml')
-        if flush or not os.path.isfile(self.cachefilename):
-            self.data = {}
-        else:
-            with io.open(self.cachefilename, 'r', encoding='utf-8') as yfile:
-                self.data = yaml.load(yfile)
-        logger.debug("Using cache: '{0}'".format(self.cachefilename))
+    def __init__(self, jjb_config):
+        url = jjb_config.jenkins['url']
+        user = jjb_config.jenkins['user']
+        password = jjb_config.jenkins['password']
+        timeout = jjb_config.jenkins['timeout']
 
-    @staticmethod
-    def get_cache_dir():
-        home = os.path.expanduser('~')
-        if home == '~':
-            raise OSError('Could not locate home folder')
-        xdg_cache_home = os.environ.get('XDG_CACHE_HOME') or \
-            os.path.join(home, '.cache')
-        path = os.path.join(xdg_cache_home, 'jenkins_jobs')
-        if not os.path.isdir(path):
-            try:
-                os.makedirs(path)
-            except OSError as ose:
-                # it could happen that two jjb instances are running at the
-                # same time and that the other instance created the directory
-                # after we made the check, in which case there is no error
-                if ose.errno != errno.EEXIST:
-                    raise ose
-        return path
-
-    def set(self, job, md5):
-        self.data[job] = md5
-
-    def clear(self):
-        self.data.clear()
-
-    def is_cached(self, job):
-        if job in self.data:
-            return True
-        return False
-
-    def has_changed(self, job, md5):
-        if job in self.data and self.data[job] == md5:
-            return False
-        return True
-
-    def save(self):
-        # check we initialized sufficiently in case called via __del__
-        # due to an exception occurring in the __init__
-        if getattr(self, 'data', None) is not None:
-            try:
-                with io.open(self.cachefilename, 'w',
-                             encoding='utf-8') as yfile:
-                    self._yaml.dump(self.data, yfile)
-            except Exception as e:
-                self._logger.error("Failed to write to cache file '%s' on "
-                                   "exit: %s" % (self.cachefilename, e))
-            else:
-                self._logger.info("Cache saved")
-                self._logger.debug("Cache written out to '%s'" %
-                                   self.cachefilename)
-
-    def __del__(self):
-        self.save()
-
-
-class Jenkins(object):
-    def __init__(self, url, user, password, timeout=_DEFAULT_TIMEOUT):
         if timeout != _DEFAULT_TIMEOUT:
             self.jenkins = jenkins.Jenkins(url, user, password, timeout)
         else:
             self.jenkins = jenkins.Jenkins(url, user, password)
+
+        self.cache = JobCache(jjb_config.jenkins['url'],
+                              flush=jjb_config.builder['flush_cache'])
+
+        self._plugins_list = jjb_config.builder['plugins_info']
         self._jobs = None
         self._job_list = None
+        self._jjb_config = jjb_config
 
     @property
     def jobs(self):
@@ -153,19 +95,12 @@ class Jenkins(object):
 
     def get_job_md5(self, job_name):
         xml = self.jenkins.get_job_config(job_name)
-        return hashlib.md5(xml).hexdigest()
+        return hashlib.md5(xml.encode('utf-8')).hexdigest()
 
     def delete_job(self, job_name):
         if self.is_job(job_name):
             logger.info("Deleting jenkins job {0}".format(job_name))
             self.jenkins.delete_job(job_name)
-
-    def delete_all_jobs(self):
-        # execute a groovy script to delete all jobs is much faster than
-        # using the doDelete REST endpoint to delete one job at a time.
-        script = ('for(job in jenkins.model.Jenkins.theInstance.getProjects())'
-                  '       { job.delete(); }')
-        self.jenkins.run_script(script)
 
     def get_plugins_info(self):
         """ Return a list of plugin_info dicts, one for each plugin on the
@@ -175,9 +110,10 @@ class Jenkins(object):
             plugins_list = self.jenkins.get_plugins_info()
         except jenkins.JenkinsException as e:
             if re.search("Connection refused", str(e)):
-                logger.warn("Unable to retrieve Jenkins Plugin Info from {0},"
-                            " using default empty plugins info list.".format(
-                                self.jenkins.server))
+                logger.warning(
+                    "Unable to retrieve Jenkins Plugin Info from {0},"
+                    " using default empty plugins info list.".format(
+                        self.jenkins.server))
                 plugins_list = [{'shortName': '',
                                  'version': '',
                                  'longName': ''}]
@@ -203,124 +139,64 @@ class Jenkins(object):
             pass
         return False
 
-
-class Builder(object):
-    def __init__(self, jenkins_url, jenkins_user, jenkins_password,
-                 config=None, jenkins_timeout=_DEFAULT_TIMEOUT,
-                 ignore_cache=False, flush_cache=False, plugins_list=None):
-        self.jenkins = Jenkins(jenkins_url, jenkins_user, jenkins_password,
-                               jenkins_timeout)
-        self.cache = CacheStorage(jenkins_url, flush=flush_cache)
-        self.global_config = config
-        self.ignore_cache = ignore_cache
-        self._plugins_list = plugins_list
-
     @property
     def plugins_list(self):
         if self._plugins_list is None:
-            self._plugins_list = self.jenkins.get_plugins_info()
+            self._plugins_list = self.get_plugins_info()
         return self._plugins_list
 
-    def load_files(self, fn):
-        self.parser = YamlParser(self.global_config, self.plugins_list)
-
-        # handle deprecated behavior, and check that it's not a file like
-        # object as these may implement the '__iter__' attribute.
-        if not hasattr(fn, '__iter__') or hasattr(fn, 'read'):
-            logger.warning(
-                'Passing single elements for the `fn` argument in '
-                'Builder.load_files is deprecated. Please update your code '
-                'to use a list as support for automatic conversion will be '
-                'removed in a future version.')
-            fn = [fn]
-
-        files_to_process = []
-        for path in fn:
-            if not hasattr(path, 'read') and os.path.isdir(path):
-                files_to_process.extend([os.path.join(path, f)
-                                         for f in os.listdir(path)
-                                         if (f.endswith('.yml')
-                                             or f.endswith('.yaml'))])
-            else:
-                files_to_process.append(path)
-
-        # symlinks used to allow loading of sub-dirs can result in duplicate
-        # definitions of macros and templates when loading all from top-level
-        unique_files = []
-        for f in files_to_process:
-            if hasattr(f, 'read'):
-                unique_files.append(f)
-                continue
-            rpf = os.path.realpath(f)
-            if rpf not in unique_files:
-                unique_files.append(rpf)
-            else:
-                logger.warning("File '%s' already added as '%s', ignoring "
-                               "reference to avoid duplicating yaml "
-                               "definitions." % (f, rpf))
-
-        for in_file in unique_files:
-            # use of ask-for-permissions instead of ask-for-forgiveness
-            # performs better when low use cases.
-            if hasattr(in_file, 'name'):
-                fname = in_file.name
-            else:
-                fname = in_file
-            logger.debug("Parsing YAML file {0}".format(fname))
-            if hasattr(in_file, 'read'):
-                self.parser.parse_fp(in_file)
-            else:
-                self.parser.parse(in_file)
-
     def delete_old_managed(self, keep=None):
-        jobs = self.jenkins.get_jobs()
+        jobs = self.get_jobs()
         deleted_jobs = 0
-        if keep is None:
-            keep = [job.name for job in self.parser.xml_jobs]
         for job in jobs:
-            if job['name'] not in keep and \
-                    self.jenkins.is_managed(job['name']):
-                logger.info("Removing obsolete jenkins job {0}"
-                            .format(job['name']))
-                self.delete_job(job['name'])
-                deleted_jobs += 1
+            if job['name'] not in keep:
+                if self.is_managed(job['name']):
+                    logger.info("Removing obsolete jenkins job {0}"
+                                .format(job['name']))
+                    self.delete_job(job['name'])
+                    deleted_jobs += 1
+                else:
+                    logger.info("Not deleting unmanaged jenkins job %s",
+                                job['name'])
             else:
-                logger.debug("Ignoring unmanaged jenkins job %s",
-                             job['name'])
+                logger.debug("Keeping job %s", job['name'])
         return deleted_jobs
 
-    def delete_job(self, jobs_glob, fn=None):
-        if fn:
-            self.load_files(fn)
-            self.parser.expandYaml([jobs_glob])
-            jobs = [j['name'] for j in self.parser.jobs]
-        else:
-            jobs = [jobs_glob]
-
+    def delete_jobs(self, jobs):
         if jobs is not None:
             logger.info("Removing jenkins job(s): %s" % ", ".join(jobs))
         for job in jobs:
-            self.jenkins.delete_job(job)
+            self.delete_job(job)
             if(self.cache.is_cached(job)):
                 self.cache.set(job, '')
+        self.cache.save()
 
     def delete_all_jobs(self):
-        jobs = self.jenkins.get_jobs()
+        jobs = self.get_jobs()
         logger.info("Number of jobs to delete:  %d", len(jobs))
-        self.jenkins.delete_all_jobs()
+        script = ('for(job in jenkins.model.Jenkins.theInstance.getAllItems())'
+                  '       { job.delete(); }')
+        self.jenkins.run_script(script)
         # Need to clear the JJB cache after deletion
         self.cache.clear()
 
-    def update_job(self, input_fn, jobs_glob=None, output=None):
-        self.load_files(input_fn)
-        self.parser.expandYaml(jobs_glob)
-        self.parser.generateXML()
+    def changed(self, job):
+        md5 = job.md5()
 
-        logger.info("Number of jobs generated:  %d", len(self.parser.xml_jobs))
-        self.parser.xml_jobs.sort(key=operator.attrgetter('name'))
+        changed = (self._jjb_config.builder['ignore_cache'] or
+                   self.cache.has_changed(job.name, md5))
+        if not changed:
+            logger.debug("'{0}' has not changed".format(job.name))
+        return changed
 
-        if (output and not hasattr(output, 'write')
-                and not os.path.isdir(output)):
+    def update_jobs(self, xml_jobs, output=None, n_workers=None):
+        orig = time.time()
+
+        logger.info("Number of jobs generated:  %d", len(xml_jobs))
+        xml_jobs.sort(key=operator.attrgetter('name'))
+
+        if (output and not hasattr(output, 'write') and
+                not os.path.isdir(output)):
             logger.info("Creating directory %s" % output)
             try:
                 os.makedirs(output)
@@ -328,14 +204,16 @@ class Builder(object):
                 if not os.path.isdir(output):
                     raise
 
-        updated_jobs = 0
-        for job in self.parser.xml_jobs:
-            if output:
+        if output:
+            # ensure only wrapped once
+            if hasattr(output, 'write'):
+                output = utils.wrap_stream(output)
+
+            for job in xml_jobs:
                 if hasattr(output, 'write'):
                     # `output` is a file-like object
                     logger.info("Job name:  %s", job.name)
                     logger.debug("Writing XML to '{0}'".format(output))
-                    output = utils.wrap_stream(output)
                     try:
                         output.write(job.output())
                     except IOError as exc:
@@ -351,17 +229,48 @@ class Builder(object):
                 logger.debug("Writing XML to '{0}'".format(output_fn))
                 with io.open(output_fn, 'w', encoding='utf-8') as f:
                     f.write(job.output().decode('utf-8'))
-                continue
-            md5 = job.md5()
-            if (self.jenkins.is_job(job.name)
-                    and not self.cache.is_cached(job.name)):
-                old_md5 = self.jenkins.get_job_md5(job.name)
-                self.cache.set(job.name, old_md5)
+            return xml_jobs, len(xml_jobs)
 
-            if self.cache.has_changed(job.name, md5) or self.ignore_cache:
-                self.jenkins.update_job(job.name, job.output().decode('utf-8'))
-                updated_jobs += 1
-                self.cache.set(job.name, md5)
+        # Filter out the jobs that did not change
+        logging.debug('Filtering %d jobs for changed jobs',
+                      len(xml_jobs))
+        step = time.time()
+        jobs = [job for job in xml_jobs
+                if self.changed(job)]
+        logging.debug("Filtered for changed jobs in %ss",
+                      (time.time() - step))
+
+        if not jobs:
+            return [], 0
+
+        # Update the jobs
+        logging.debug('Updating jobs')
+        step = time.time()
+        p_params = [{'job': job} for job in jobs]
+        results = self.parallel_update_job(
+            n_workers=n_workers,
+            concurrent=p_params)
+        logging.debug("Parsing results")
+        # generalize the result parsing, as a concurrent job always returns a
+        # list
+        if len(p_params) in (1, 0):
+            results = [results]
+        for result in results:
+            if isinstance(result, Exception):
+                raise result
             else:
-                logger.debug("'{0}' has not changed".format(job.name))
-        return self.parser.xml_jobs, updated_jobs
+                # update in-memory cache
+                j_name, j_md5 = result
+                self.cache.set(j_name, j_md5)
+        # write cache to disk
+        self.cache.save()
+        logging.debug("Updated %d jobs in %ss",
+                      len(jobs),
+                      time.time() - step)
+        logging.debug("Total run took %ss", (time.time() - orig))
+        return jobs, len(jobs)
+
+    @concurrent
+    def parallel_update_job(self, job):
+        self.update_job(job.name, job.output().decode('utf-8'))
+        return (job.name, job.md5())

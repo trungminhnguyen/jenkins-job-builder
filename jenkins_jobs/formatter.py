@@ -35,27 +35,31 @@ def deep_format(obj, paramdict, allow_empty=False):
     if hasattr(obj, 'format'):
         try:
             result = re.match('^{obj:(?P<key>\w+)}$', obj)
-            if result is not None:
-                ret = paramdict[result.group("key")]
-            else:
-                ret = CustomFormatter(allow_empty).format(obj, **paramdict)
-        except KeyError as exc:
-            missing_key = exc.message
-            desc = "%s parameter missing to format %s\nGiven:\n%s" % (
-                missing_key, obj, pformat(paramdict))
-            raise JenkinsJobsException(desc)
+        except TypeError:
+            ret = obj.format(**paramdict)
+        else:
+            try:
+                if result is not None:
+                    ret = paramdict[result.group("key")]
+                else:
+                    ret = CustomFormatter(allow_empty).format(obj, **paramdict)
+            except KeyError as exc:
+                missing_key = exc.args[0]
+                desc = "%s parameter missing to format %s\nGiven:\n%s" % (
+                    missing_key, obj, pformat(paramdict))
+                raise JenkinsJobsException(desc)
     elif isinstance(obj, list):
-        ret = []
+        ret = type(obj)()
         for item in obj:
             ret.append(deep_format(item, paramdict, allow_empty))
     elif isinstance(obj, dict):
-        ret = {}
+        ret = type(obj)()
         for item in obj:
             try:
                 ret[CustomFormatter(allow_empty).format(item, **paramdict)] = \
                     deep_format(obj[item], paramdict, allow_empty)
             except KeyError as exc:
-                missing_key = exc.message
+                missing_key = exc.args[0]
                 desc = "%s parameter missing to format %s\nGiven:\n%s" % (
                     missing_key, obj, pformat(paramdict))
                 raise JenkinsJobsException(desc)
