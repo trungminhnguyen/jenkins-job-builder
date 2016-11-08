@@ -17,6 +17,7 @@
 
 import codecs
 import locale
+import re
 
 
 def wrap_stream(stream, encoding='utf-8'):
@@ -33,3 +34,7 @@ def wrap_stream(stream, encoding='utf-8'):
         return stream
 
     return codecs.EncodedFile(stream, encoding, stream_enc)
+
+
+def escape_braces(data):
+    return re.sub(r'({|})', r'\1\1', data)
