@@ -95,7 +95,6 @@ character.
 import functools
 import io
 import logging
-import re
 import os
 import yaml
 from yaml.constructor import BaseConstructor
@@ -105,6 +104,9 @@ try:
     from collections import OrderedDict
 except ImportError:
     from ordereddict import OrderedDict
+
+from jenkins_jobs import utils
+
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +230,7 @@ class LocalLoader(OrderedConstructor, LocalAnchorLoader):
         self.search_path.append(os.path.normpath(os.path.curdir))
 
     def _escape(self, data):
-        return re.sub(r'({|})', r'\1\1', data)
+        return utils.escape_braces(data)
 
 
 class BaseYAMLObject(YAMLObject):
