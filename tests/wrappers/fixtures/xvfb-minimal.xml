@@ -4,7 +4,6 @@
     <org.jenkinsci.plugins.xvfb.XvfbBuildWrapper>
       <installationName>default</installationName>
       <autoDisplayName>false</autoDisplayName>
-      <displayName/>
       <assignedLabels/>
       <parallelBuild>false</parallelBuild>
       <timeout>0</timeout>
