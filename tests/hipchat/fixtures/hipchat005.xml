@@ -1,8 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <project>
-  <publishers>
-    <jenkins.plugins.hipchat.HipChatNotifier>
-      <token/>
+  <properties>
+    <jenkins.plugins.hipchat.HipChatNotifier_-HipChatJobProperty>
       <room>room1,room2</room>
       <startNotification>true</startNotification>
       <notifySuccess>false</notifySuccess>
@@ -11,8 +10,14 @@
       <notifyUnstable>false</notifyUnstable>
       <notifyFailure>false</notifyFailure>
       <notifyBackToNormal>false</notifyBackToNormal>
-      <startJobMessage>project_start</startJobMessage>
-      <completeJobMessage>project_completed</completeJobMessage>
+    </jenkins.plugins.hipchat.HipChatNotifier_-HipChatJobProperty>
+  </properties>
+  <publishers>
+    <jenkins.plugins.hipchat.HipChatNotifier>
+      <buildServerUrl>http://localhost:8080/</buildServerUrl>
+      <sendAs>Jenkins</sendAs>
+      <authToken>dummy</authToken>
+      <room/>
     </jenkins.plugins.hipchat.HipChatNotifier>
   </publishers>
 </project>
