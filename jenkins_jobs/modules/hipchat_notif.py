@@ -74,14 +74,15 @@ Example:
 # and this object is passed to the HipChat() class initialiser.
 
 import logging
+import pkg_resources
 import sys
 import xml.etree.ElementTree as XML
 
 from six.moves import configparser
+from jenkins_jobs.modules.publishers import hipchat as hipchat_pub
 
 import jenkins_jobs.errors
 import jenkins_jobs.modules.base
-
 
 logger = logging.getLogger(__name__)
 
@@ -131,12 +132,26 @@ class HipChat(jenkins_jobs.modules.base.Base):
                 logger.warning("'room' is deprecated, please use 'rooms'")
                 hipchat['rooms'] = [hipchat['room']]
 
-        properties = xml_parent.find('properties')
-        if properties is None:
-            properties = XML.SubElement(xml_parent, 'properties')
-        pdefhip = XML.SubElement(properties,
-                                 'jenkins.plugins.hipchat.'
-                                 'HipChatNotifier_-HipChatJobProperty')
+        plugin_info = self.registry.get_plugin_info("Jenkins HipChat Plugin")
+        version = pkg_resources.parse_version(plugin_info.get('version', '0'))
+
+        if version >= pkg_resources.parse_version("0.1.9"):
+            publishers = xml_parent.find('publishers')
+            if publishers is None:
+                publishers = XML.SubElement(xml_parent, 'publishers')
+
+            logger.warning(
+                "'hipchat' module supports the old plugin versions <1.9, "
+                "newer versions are supported via the 'publishers' module. "
+                "Please upgrade you job definition")
+            return self.registry.dispatch('publisher', publishers, data)
+        else:
+            properties = xml_parent.find('properties')
+            if properties is None:
+                properties = XML.SubElement(xml_parent, 'properties')
+            pdefhip = XML.SubElement(properties,
+                                     'jenkins.plugins.hipchat.'
+                                     'HipChatNotifier_-HipChatJobProperty')
 
         room = XML.SubElement(pdefhip, 'room')
         if 'rooms' in hipchat:
